@@ -1,0 +1,17 @@
+[package]
+name = "stable_coin_issuer_client"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["client"]
+client = ["reqwest", "serde_json", "thiserror"]
+
+[dependencies]
+tari_template_lib = { workspace = true }
+
+reqwest = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+

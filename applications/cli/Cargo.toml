@@ -1,0 +1,11 @@
+[package]
+name = "stable_coin_cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+url = { workspace = true, features = [] }
+sqlx = { workspace = true, features = ["sqlite", "runtime-tokio"] }
+tokio = { workspace = true, features = ["rt", "macros"] }

@@ -1,0 +1,13 @@
+CREATE TABLE issuers (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    component_address VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE settings (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    value TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
