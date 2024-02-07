@@ -5,6 +5,9 @@ members = [
     "issuer_client",
     "store",
 ]
+exclude = [
+    "tari-stable-coin-client"
+]
 resolver = "2"
 
 [workspace.dependencies]
