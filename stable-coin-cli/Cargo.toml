@@ -1,16 +1,20 @@
 [package]
-name = "TariStableCoin"
+name = "tari_stable_coin_cli"
 version = "0.0.1"
 edition = "2021"
 
 
 [dependencies]
 
-tari_wallet_daemon_client = { git = "https://github.com/tari-project/tari-dan", branch = "development" }
-tari_engine_types = { git = "https://github.com/tari-project/tari-dan", branch = "development" }
-tari_template_lib = { git = "https://github.com/tari-project/tari-dan", branch = "development" }
-tari_transaction = { git = "https://github.com/tari-project/tari-dan", branch = "development" }
-
+#tari_wallet_daemon_client = { git = "https://github.com/tari-project/tari-dan", branch = "development" }
+#tari_engine_types = { git = "https://github.com/tari-project/tari-dan", branch = "development" }
+#tari_template_lib = { git = "https://github.com/tari-project/tari-dan", branch = "development" }
+#tari_transaction = { git = "https://github.com/tari-project/tari-dan", branch = "development" }
+#
+tari_wallet_daemon_client = { path = "../../dan/clients/wallet_daemon_client" }
+tari_engine_types = { path = "../../dan/dan_layer/engine_types" }
+tari_template_lib = { path = "../../dan/dan_layer/template_lib" }
+tari_transaction = { path = "../../dan/dan_layer/transaction" }
 tari_utilities ="*"
 
 

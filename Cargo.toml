@@ -6,7 +6,7 @@ members = [
     "store",
 ]
 exclude = [
-    "tari-stable-coin-client"
+    "stable-coin-cli"
 ]
 resolver = "2"
 

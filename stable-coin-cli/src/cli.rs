@@ -1,10 +1,10 @@
 //  Copyright 2023 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
+use crate::daemon_client::DaemonClient;
 use clap::Parser;
 use clap::Subcommand;
 use multiaddr::Multiaddr;
-use crate::daemon_client::DaemonClient;
 use tari_engine_types::parse_arg;
 
 #[derive(Parser, Debug)]
@@ -13,17 +13,17 @@ use tari_engine_types::parse_arg;
 pub(crate) struct Cli {
     #[clap(long, short = 'e', alias = "endpoint", env = "JRPC_ENDPOINT")]
     pub daemon_jrpc_endpoint: Option<String>,
-    #[clap(long, short='t', alias= "token")]
+    #[clap(long, short = 't', alias = "token", env = "AUTH_TOKEN")]
     pub auth_token: Option<String>,
-    #[clap(long, alias="template_address", default_value ="")]
+    #[clap(long, alias = "template_address", default_value = "")]
     pub template: String,
-    #[clap(long, short='d')]
+    #[clap(long, short = 'd')]
     pub dump_buckets: bool,
     #[clap(long)]
     pub dry_run: bool,
     #[clap(subcommand)]
     pub command: Command,
-    #[clap(long, short='f', default_value="1000")]
+    #[clap(long, short = 'f', default_value = "2000")]
     pub max_fee: u64,
     #[clap(long, short = 'a', default_value = "TestAccount_0")]
     pub default_account: String,
@@ -38,986 +38,778 @@ impl Cli {
 #[derive(Debug, Subcommand, Clone)]
 pub(crate) enum Command {
     Login(login::Command),
-    
+
     Instantiate(instantiate::Command),
-    
+
     IncreaseSupply(increase_supply::Command),
-    
+
     DecreaseSupply(decrease_supply::Command),
-    
+
     TotalSupply(total_supply::Command),
-    
+
     Withdraw(withdraw::Command),
-    
+
     Deposit(deposit::Command),
-    
+
     CreateNewAdmin(create_new_admin::Command),
-    
+
     CreateNewUser(create_new_user::Command),
-    
+
     BlacklistUser(blacklist_user::Command),
-    
+
     RemoveFromBlacklist(remove_from_blacklist::Command),
-    
+
     GetUserData(get_user_data::Command),
-    
+
     SetUserData(set_user_data::Command),
-    
 }
 
-
 pub mod login {
-  use clap::Args;
-  use crate::daemon_client::DaemonClient;
+    use crate::daemon_client::DaemonClient;
+    use clap::Args;
     use std::fs;
 
     #[derive(Debug, Args, Clone)]
-    pub struct Command {
+    pub struct Command {}
 
+    impl Command {
+        pub async fn run(self, mut client: DaemonClient) {
+            let token = client.login().await;
+            let token = client.grant(token, "scaffold".to_string()).await;
+            fs::write("token.data", token).unwrap();
+        }
+    }
+}
+
+pub(crate) mod instantiate {
+    use crate::daemon_client::DaemonClient;
+    use clap::Args;
+    use tari_engine_types::instruction::Instruction;
+    use tari_engine_types::parse_arg;
+    use tari_engine_types::TemplateAddress;
+    use tari_template_lib::args;
+    use tari_wallet_daemon_client::types::AccountGetResponse;
+
+    #[derive(Debug, Args, Clone)]
+    pub struct Command {
+        pub initial_token_supply: String,
+
+        pub token_symbol: String,
+
+        pub token_metadata: String,
     }
 
     impl Command {
-    pub async fn run(self, mut client: DaemonClient) {
-       let token = client.login().await;
-       fs::write("token.data", token).unwrap();
+        pub async fn run(
+            self,
+            mut client: DaemonClient,
+            template_address: TemplateAddress,
+            dump_buckets: bool,
+            fees: u64,
+        ) {
+            let AccountGetResponse { account, .. } = client.get_default_account().await;
+
+            let mut instructions = vec![];
+            instructions.push(Instruction::CallFunction {
+                template_address,
+                function: "instantiate".to_string(),
+                args: vec![
+                    parse_arg(&self.initial_token_supply).unwrap(),
+                    parse_arg(&self.token_symbol).unwrap(),
+                    parse_arg(&self.token_metadata).unwrap(),
+                ],
+            });
+
+            instructions.push(Instruction::PutLastInstructionOutputOnWorkspace {
+                key: b"out_bucket".to_vec(),
+            });
+            instructions.push(Instruction::CallMethod {
+                component_address: account.address.as_component_address().unwrap(),
+                method: "deposit".to_string(),
+                args: args![Variable("out_bucket")],
+            });
+
+            let transaction_id = client
+                .submit_instructions(instructions, dump_buckets, false, fees, vec![])
+                .await;
+
+            println!("submitted");
+            let result = client.wait_for_transaction_result(transaction_id).await;
+            println!("result: {:?}", result);
+        }
     }
-    }
-}
-
-
-pub(crate) mod instantiate {
-   use clap::Args;
-   use crate::daemon_client::DaemonClient;
-   use serde_json::json;
-    use tari_engine_types::parse_arg;
-    use tari_engine_types::instruction::Instruction;
-    use tari_utilities::hex::Hex;
-     use tari_utilities::hex::from_hex;
-use tari_engine_types::TemplateAddress;
-use tari_template_lib::prelude::ComponentAddress;
-use tari_transaction::SubstateRequirement;
-use tari_template_lib::args;
- use tari_template_lib::prelude::Amount;
- use tari_template_lib::prelude::ResourceAddress;
-  use std::str::FromStr;
-
-
-
-
-   #[derive(Debug, Args, Clone)]
-   pub struct Command {
-      
-      
-          
-       pub initial_token_supply : String,
-           
-       
-      
-      
-          
-       pub token_symbol : String,
-           
-       
-      
-      
-          
-       pub token_metadata : String,
-           
-       
-      
-   }
-
-   impl Command {
-
-    
-       pub async fn run(self, mut client: DaemonClient, template_address: TemplateAddress, dump_buckets: bool, fees: u64) {
-
-       // let template_address= ;
-        let  function = "instantiate".to_string();
-
-
-
-                client.submit_instruction(Instruction::CallFunction {
-                    template_address,
-                    function,
-                    args: vec![
-                        
-      
-       parse_arg(&self.initial_token_supply).unwrap(),
-      
-      
-      
-       parse_arg(&self.token_symbol).unwrap(),
-      
-      
-      
-       parse_arg(&self.token_metadata).unwrap(),
-      
-      
-                    ]
-           }, dump_buckets, false, fees, vec![]
-
-            ).await;
-            println!("done");
-
-       }
-
-       
-
-   }
 }
 
 pub(crate) mod increase_supply {
-   use clap::Args;
-   use crate::daemon_client::DaemonClient;
-   use serde_json::json;
-    use tari_engine_types::parse_arg;
+    use crate::daemon_client::DaemonClient;
+    use clap::Args;
     use tari_engine_types::instruction::Instruction;
+    use tari_engine_types::parse_arg;
+    use tari_template_lib::args;
+    use tari_template_lib::prelude::ComponentAddress;
     use tari_utilities::hex::Hex;
-     use tari_utilities::hex::from_hex;
-use tari_engine_types::TemplateAddress;
-use tari_template_lib::prelude::ComponentAddress;
-use tari_transaction::SubstateRequirement;
-use tari_template_lib::args;
- use tari_template_lib::prelude::Amount;
- use tari_template_lib::prelude::ResourceAddress;
-  use std::str::FromStr;
 
+    #[derive(Debug, Args, Clone)]
+    pub struct Command {
+        pub component_address: String,
 
+        pub amount: String,
+    }
 
+    impl Command {
+        pub async fn run(
+            self,
+            mut client: DaemonClient,
+            dump_buckets: bool,
+            is_dry_run: bool,
+            fees: u64,
+        ) {
+            // let template_address= ;
+            let method = "increase_supply".to_string();
 
-   #[derive(Debug, Args, Clone)]
-   pub struct Command {
-      
-      
-       pub component_address: String,
-       
-      
-      
-          
-       pub amount : String,
-           
-       
-      
-   }
+            let mut instructions = vec![];
 
-   impl Command {
+            instructions.push(Instruction::CallMethod {
+                component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
+                method,
+                args: args![parse_arg(&self.amount).unwrap(),],
+            });
 
-    
-
- pub async fn run(self, mut client: DaemonClient, dump_buckets: bool, is_dry_run: bool, fees: u64) {
-
-       // let template_address= ;
-        let method = "increase_supply".to_string();
-
-    let mut instructions = vec![];
-    
-    instructions.push(
-    Instruction::CallMethod {
-                        component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
-                        method,
-                        args: args![
-                            
-          
-          
-          
-            
-           parse_arg(&self.amount).unwrap(),
-           
-          
-          
-                        ]
-                   }
-    );
-
-                client.submit_instructions(instructions, dump_buckets, is_dry_run, fees, vec![format!("component_{}", self.component_address).parse().unwrap()]
-
-            ).await;
-            println!("done");
-
-       }
-
-
-    
-
-   }
+            let transaction_id = client
+                .submit_instructions(
+                    instructions,
+                    dump_buckets,
+                    is_dry_run,
+                    fees,
+                    vec![format!("component_{}", self.component_address)
+                        .parse()
+                        .unwrap()],
+                )
+                .await;
+            println!("submitted");
+            let result = client.wait_for_transaction_result(transaction_id).await;
+            println!("result: {:?}", result);
+        }
+    }
 }
 
 pub(crate) mod decrease_supply {
-   use clap::Args;
-   use crate::daemon_client::DaemonClient;
-   use serde_json::json;
-    use tari_engine_types::parse_arg;
+    use crate::daemon_client::DaemonClient;
+    use clap::Args;
+    use serde_json::json;
+    use std::str::FromStr;
     use tari_engine_types::instruction::Instruction;
+    use tari_engine_types::parse_arg;
+    use tari_engine_types::TemplateAddress;
+    use tari_template_lib::args;
+    use tari_template_lib::prelude::Amount;
+    use tari_template_lib::prelude::ComponentAddress;
+    use tari_template_lib::prelude::ResourceAddress;
+    use tari_transaction::SubstateRequirement;
+    use tari_utilities::hex::from_hex;
     use tari_utilities::hex::Hex;
-     use tari_utilities::hex::from_hex;
-use tari_engine_types::TemplateAddress;
-use tari_template_lib::prelude::ComponentAddress;
-use tari_transaction::SubstateRequirement;
-use tari_template_lib::args;
- use tari_template_lib::prelude::Amount;
- use tari_template_lib::prelude::ResourceAddress;
-  use std::str::FromStr;
 
+    #[derive(Debug, Args, Clone)]
+    pub struct Command {
+        pub component_address: String,
 
+        pub amount: String,
+    }
 
+    impl Command {
+        pub async fn run(
+            self,
+            mut client: DaemonClient,
+            dump_buckets: bool,
+            is_dry_run: bool,
+            fees: u64,
+        ) {
+            // let template_address= ;
+            let method = "decrease_supply".to_string();
 
-   #[derive(Debug, Args, Clone)]
-   pub struct Command {
-      
-      
-       pub component_address: String,
-       
-      
-      
-          
-       pub amount : String,
-           
-       
-      
-   }
+            let mut instructions = vec![];
 
-   impl Command {
+            instructions.push(Instruction::CallMethod {
+                component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
+                method,
+                args: args![parse_arg(&self.amount).unwrap(),],
+            });
 
-    
-
- pub async fn run(self, mut client: DaemonClient, dump_buckets: bool, is_dry_run: bool, fees: u64) {
-
-       // let template_address= ;
-        let method = "decrease_supply".to_string();
-
-    let mut instructions = vec![];
-    
-    instructions.push(
-    Instruction::CallMethod {
-                        component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
-                        method,
-                        args: args![
-                            
-          
-          
-          
-            
-           parse_arg(&self.amount).unwrap(),
-           
-          
-          
-                        ]
-                   }
-    );
-
-                client.submit_instructions(instructions, dump_buckets, is_dry_run, fees, vec![format!("component_{}", self.component_address).parse().unwrap()]
-
-            ).await;
-            println!("done");
-
-       }
-
-
-    
-
-   }
+            let transaction_id = client
+                .submit_instructions(
+                    instructions,
+                    dump_buckets,
+                    is_dry_run,
+                    fees,
+                    vec![format!("component_{}", self.component_address)
+                        .parse()
+                        .unwrap()],
+                )
+                .await;
+            println!("submitted");
+            let result = client.wait_for_transaction_result(transaction_id).await;
+            println!("result: {:?}", result);
+        }
+    }
 }
 
 pub(crate) mod total_supply {
-   use clap::Args;
-   use crate::daemon_client::DaemonClient;
-   use serde_json::json;
-    use tari_engine_types::parse_arg;
+    use crate::daemon_client::DaemonClient;
+    use clap::Args;
+    use serde_json::json;
+    use std::str::FromStr;
     use tari_engine_types::instruction::Instruction;
+    use tari_engine_types::parse_arg;
+    use tari_engine_types::TemplateAddress;
+    use tari_template_lib::args;
+    use tari_template_lib::prelude::Amount;
+    use tari_template_lib::prelude::ComponentAddress;
+    use tari_template_lib::prelude::ResourceAddress;
+    use tari_transaction::SubstateRequirement;
+    use tari_utilities::hex::from_hex;
     use tari_utilities::hex::Hex;
-     use tari_utilities::hex::from_hex;
-use tari_engine_types::TemplateAddress;
-use tari_template_lib::prelude::ComponentAddress;
-use tari_transaction::SubstateRequirement;
-use tari_template_lib::args;
- use tari_template_lib::prelude::Amount;
- use tari_template_lib::prelude::ResourceAddress;
-  use std::str::FromStr;
 
+    #[derive(Debug, Args, Clone)]
+    pub struct Command {
+        pub component_address: String,
+    }
 
+    impl Command {
+        pub async fn run(
+            self,
+            mut client: DaemonClient,
+            dump_buckets: bool,
+            is_dry_run: bool,
+            fees: u64,
+        ) {
+            // let template_address= ;
+            let method = "total_supply".to_string();
 
+            let mut instructions = vec![];
 
-   #[derive(Debug, Args, Clone)]
-   pub struct Command {
-      
-      
-       pub component_address: String,
-       
-      
-   }
+            instructions.push(Instruction::CallMethod {
+                component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
+                method,
+                args: args![],
+            });
 
-   impl Command {
-
-    
-
- pub async fn run(self, mut client: DaemonClient, dump_buckets: bool, is_dry_run: bool, fees: u64) {
-
-       // let template_address= ;
-        let method = "total_supply".to_string();
-
-    let mut instructions = vec![];
-    
-    instructions.push(
-    Instruction::CallMethod {
-                        component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
-                        method,
-                        args: args![
-                            
-          
-          
-                        ]
-                   }
-    );
-
-                client.submit_instructions(instructions, dump_buckets, is_dry_run, fees, vec![format!("component_{}", self.component_address).parse().unwrap()]
-
-            ).await;
-            println!("done");
-
-       }
-
-
-    
-
-   }
+            let transaction_id = client
+                .submit_instructions(
+                    instructions,
+                    dump_buckets,
+                    is_dry_run,
+                    fees,
+                    vec![format!("component_{}", self.component_address)
+                        .parse()
+                        .unwrap()],
+                )
+                .await;
+            println!("submitted");
+            let result = client.wait_for_transaction_result(transaction_id).await;
+            println!("result: {:?}", result);
+        }
+    }
 }
 
 pub(crate) mod withdraw {
-   use clap::Args;
-   use crate::daemon_client::DaemonClient;
-   use serde_json::json;
-    use tari_engine_types::parse_arg;
+    use crate::daemon_client::DaemonClient;
+    use clap::Args;
+    use serde_json::json;
+    use std::str::FromStr;
     use tari_engine_types::instruction::Instruction;
+    use tari_engine_types::parse_arg;
+    use tari_engine_types::TemplateAddress;
+    use tari_template_lib::args;
+    use tari_template_lib::prelude::Amount;
+    use tari_template_lib::prelude::ComponentAddress;
+    use tari_template_lib::prelude::ResourceAddress;
+    use tari_transaction::SubstateRequirement;
+    use tari_utilities::hex::from_hex;
     use tari_utilities::hex::Hex;
-     use tari_utilities::hex::from_hex;
-use tari_engine_types::TemplateAddress;
-use tari_template_lib::prelude::ComponentAddress;
-use tari_transaction::SubstateRequirement;
-use tari_template_lib::args;
- use tari_template_lib::prelude::Amount;
- use tari_template_lib::prelude::ResourceAddress;
-  use std::str::FromStr;
 
+    #[derive(Debug, Args, Clone)]
+    pub struct Command {
+        pub component_address: String,
 
+        pub amount: String,
+    }
 
+    impl Command {
+        pub async fn run(
+            self,
+            mut client: DaemonClient,
+            dump_buckets: bool,
+            is_dry_run: bool,
+            fees: u64,
+        ) {
+            // let template_address= ;
+            let method = "withdraw".to_string();
 
-   #[derive(Debug, Args, Clone)]
-   pub struct Command {
-      
-      
-       pub component_address: String,
-       
-      
-      
-          
-       pub amount : String,
-           
-       
-      
-   }
+            let mut instructions = vec![];
 
-   impl Command {
+            instructions.push(Instruction::CallMethod {
+                component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
+                method,
+                args: args![parse_arg(&self.amount).unwrap(),],
+            });
 
-    
-
- pub async fn run(self, mut client: DaemonClient, dump_buckets: bool, is_dry_run: bool, fees: u64) {
-
-       // let template_address= ;
-        let method = "withdraw".to_string();
-
-    let mut instructions = vec![];
-    
-    instructions.push(
-    Instruction::CallMethod {
-                        component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
-                        method,
-                        args: args![
-                            
-          
-          
-          
-            
-           parse_arg(&self.amount).unwrap(),
-           
-          
-          
-                        ]
-                   }
-    );
-
-                client.submit_instructions(instructions, dump_buckets, is_dry_run, fees, vec![format!("component_{}", self.component_address).parse().unwrap()]
-
-            ).await;
-            println!("done");
-
-       }
-
-
-    
-
-   }
+            let transaction_id = client
+                .submit_instructions(
+                    instructions,
+                    dump_buckets,
+                    is_dry_run,
+                    fees,
+                    vec![format!("component_{}", self.component_address)
+                        .parse()
+                        .unwrap()],
+                )
+                .await;
+            println!("submitted");
+            let result = client.wait_for_transaction_result(transaction_id).await;
+            println!("result: {:?}", result);
+        }
+    }
 }
 
 pub(crate) mod deposit {
-   use clap::Args;
-   use crate::daemon_client::DaemonClient;
-   use serde_json::json;
-    use tari_engine_types::parse_arg;
+    use crate::daemon_client::DaemonClient;
+    use clap::Args;
+    use serde_json::json;
+    use std::str::FromStr;
     use tari_engine_types::instruction::Instruction;
+    use tari_engine_types::parse_arg;
+    use tari_engine_types::TemplateAddress;
+    use tari_template_lib::args;
+    use tari_template_lib::prelude::Amount;
+    use tari_template_lib::prelude::ComponentAddress;
+    use tari_template_lib::prelude::ResourceAddress;
+    use tari_transaction::SubstateRequirement;
+    use tari_utilities::hex::from_hex;
     use tari_utilities::hex::Hex;
-     use tari_utilities::hex::from_hex;
-use tari_engine_types::TemplateAddress;
-use tari_template_lib::prelude::ComponentAddress;
-use tari_transaction::SubstateRequirement;
-use tari_template_lib::args;
- use tari_template_lib::prelude::Amount;
- use tari_template_lib::prelude::ResourceAddress;
-  use std::str::FromStr;
 
+    #[derive(Debug, Args, Clone)]
+    pub struct Command {
+        pub component_address: String,
 
-
-
-   #[derive(Debug, Args, Clone)]
-   pub struct Command {
-      
-      
-       pub component_address: String,
-       
-      
-      
-          
-        pub bucket_amount : u64,
+        pub bucket_amount: u64,
         pub bucket_resource: String,
         pub bucket_withdraw_from_component: String,
-           
-       
-      
-   }
+    }
 
-   impl Command {
+    impl Command {
+        pub async fn run(
+            self,
+            mut client: DaemonClient,
+            dump_buckets: bool,
+            is_dry_run: bool,
+            fees: u64,
+        ) {
+            // let template_address= ;
+            let method = "deposit".to_string();
 
-    
+            let mut instructions = vec![];
 
- pub async fn run(self, mut client: DaemonClient, dump_buckets: bool, is_dry_run: bool, fees: u64) {
-
-       // let template_address= ;
-        let method = "deposit".to_string();
-
-    let mut instructions = vec![];
-    
-    
-    
-     
-    
-       instructions.push(Instruction::CallMethod {
-                component_address: ComponentAddress::from_hex(&self.bucket_withdraw_from_component).unwrap(),
+            instructions.push(Instruction::CallMethod {
+                component_address: ComponentAddress::from_hex(&self.bucket_withdraw_from_component)
+                    .unwrap(),
                 method: "withdraw".to_string(),
-                args: args![ResourceAddress::from_str(&self.bucket_resource).unwrap(), self.bucket_amount],
+                args: args![
+                    ResourceAddress::from_str(&self.bucket_resource).unwrap(),
+                    self.bucket_amount
+                ],
             });
-  instructions.push(Instruction::PutLastInstructionOutputOnWorkspace {
-            key: b"bucket_bucket".to_vec(),
-        });
-     
-     
-    
-    instructions.push(
-    Instruction::CallMethod {
-                        component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
-                        method,
-                        args: args![
-                            
-          
-          
-          
-            
-              Variable("bucket_bucket"),
-          
-          
-          
-                        ]
-                   }
-    );
+            instructions.push(Instruction::PutLastInstructionOutputOnWorkspace {
+                key: b"bucket_bucket".to_vec(),
+            });
 
-                client.submit_instructions(instructions, dump_buckets, is_dry_run, fees, vec![format!("component_{}", self.component_address).parse().unwrap()]
+            instructions.push(Instruction::CallMethod {
+                component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
+                method,
+                args: args![Variable("bucket_bucket"),],
+            });
 
-            ).await;
-            println!("done");
-
-       }
-
-
-    
-
-   }
+            let transaction_id = client
+                .submit_instructions(
+                    instructions,
+                    dump_buckets,
+                    is_dry_run,
+                    fees,
+                    vec![format!("component_{}", self.component_address)
+                        .parse()
+                        .unwrap()],
+                )
+                .await;
+            println!("submitted");
+            let result = client.wait_for_transaction_result(transaction_id).await;
+            println!("result: {:?}", result);
+        }
+    }
 }
 
 pub(crate) mod create_new_admin {
-   use clap::Args;
-   use crate::daemon_client::DaemonClient;
-   use serde_json::json;
-    use tari_engine_types::parse_arg;
+    use crate::daemon_client::DaemonClient;
+    use clap::Args;
+    use serde_json::json;
+    use std::str::FromStr;
     use tari_engine_types::instruction::Instruction;
+    use tari_engine_types::parse_arg;
+    use tari_engine_types::TemplateAddress;
+    use tari_template_lib::args;
+    use tari_template_lib::prelude::Amount;
+    use tari_template_lib::prelude::ComponentAddress;
+    use tari_template_lib::prelude::ResourceAddress;
+    use tari_transaction::SubstateRequirement;
+    use tari_utilities::hex::from_hex;
     use tari_utilities::hex::Hex;
-     use tari_utilities::hex::from_hex;
-use tari_engine_types::TemplateAddress;
-use tari_template_lib::prelude::ComponentAddress;
-use tari_transaction::SubstateRequirement;
-use tari_template_lib::args;
- use tari_template_lib::prelude::Amount;
- use tari_template_lib::prelude::ResourceAddress;
-  use std::str::FromStr;
 
+    #[derive(Debug, Args, Clone)]
+    pub struct Command {
+        pub component_address: String,
+    }
 
+    impl Command {
+        pub async fn run(
+            self,
+            mut client: DaemonClient,
+            dump_buckets: bool,
+            is_dry_run: bool,
+            fees: u64,
+        ) {
+            // let template_address= ;
+            let method = "create_new_admin".to_string();
 
+            let mut instructions = vec![];
 
-   #[derive(Debug, Args, Clone)]
-   pub struct Command {
-      
-      
-       pub component_address: String,
-       
-      
-   }
+            instructions.push(Instruction::CallMethod {
+                component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
+                method,
+                args: args![],
+            });
 
-   impl Command {
-
-    
-
- pub async fn run(self, mut client: DaemonClient, dump_buckets: bool, is_dry_run: bool, fees: u64) {
-
-       // let template_address= ;
-        let method = "create_new_admin".to_string();
-
-    let mut instructions = vec![];
-    
-    instructions.push(
-    Instruction::CallMethod {
-                        component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
-                        method,
-                        args: args![
-                            
-          
-          
-                        ]
-                   }
-    );
-
-                client.submit_instructions(instructions, dump_buckets, is_dry_run, fees, vec![format!("component_{}", self.component_address).parse().unwrap()]
-
-            ).await;
-            println!("done");
-
-       }
-
-
-    
-
-   }
+            let transaction_id = client
+                .submit_instructions(
+                    instructions,
+                    dump_buckets,
+                    is_dry_run,
+                    fees,
+                    vec![format!("component_{}", self.component_address)
+                        .parse()
+                        .unwrap()],
+                )
+                .await;
+            println!("submitted");
+            let result = client.wait_for_transaction_result(transaction_id).await;
+            println!("result: {:?}", result);
+        }
+    }
 }
 
 pub(crate) mod create_new_user {
-   use clap::Args;
-   use crate::daemon_client::DaemonClient;
-   use serde_json::json;
-    use tari_engine_types::parse_arg;
+    use crate::daemon_client::DaemonClient;
+    use clap::Args;
+    use serde_json::json;
+    use std::str::FromStr;
     use tari_engine_types::instruction::Instruction;
+    use tari_engine_types::parse_arg;
+    use tari_engine_types::TemplateAddress;
+    use tari_template_lib::args;
+    use tari_template_lib::prelude::Amount;
+    use tari_template_lib::prelude::ComponentAddress;
+    use tari_template_lib::prelude::ResourceAddress;
+    use tari_transaction::SubstateRequirement;
+    use tari_utilities::hex::from_hex;
     use tari_utilities::hex::Hex;
-     use tari_utilities::hex::from_hex;
-use tari_engine_types::TemplateAddress;
-use tari_template_lib::prelude::ComponentAddress;
-use tari_transaction::SubstateRequirement;
-use tari_template_lib::args;
- use tari_template_lib::prelude::Amount;
- use tari_template_lib::prelude::ResourceAddress;
-  use std::str::FromStr;
 
+    #[derive(Debug, Args, Clone)]
+    pub struct Command {
+        pub component_address: String,
 
+        pub user_id: String,
+    }
 
+    impl Command {
+        pub async fn run(
+            self,
+            mut client: DaemonClient,
+            dump_buckets: bool,
+            is_dry_run: bool,
+            fees: u64,
+        ) {
+            // let template_address= ;
+            let method = "create_new_user".to_string();
 
-   #[derive(Debug, Args, Clone)]
-   pub struct Command {
-      
-      
-       pub component_address: String,
-       
-      
-      
-          
-       pub user_id : String,
-           
-       
-      
-   }
+            let mut instructions = vec![];
 
-   impl Command {
+            instructions.push(Instruction::CallMethod {
+                component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
+                method,
+                args: args![parse_arg(&self.user_id).unwrap(),],
+            });
 
-    
-
- pub async fn run(self, mut client: DaemonClient, dump_buckets: bool, is_dry_run: bool, fees: u64) {
-
-       // let template_address= ;
-        let method = "create_new_user".to_string();
-
-    let mut instructions = vec![];
-    
-    instructions.push(
-    Instruction::CallMethod {
-                        component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
-                        method,
-                        args: args![
-                            
-          
-          
-          
-            
-           parse_arg(&self.user_id).unwrap(),
-           
-          
-          
-                        ]
-                   }
-    );
-
-                client.submit_instructions(instructions, dump_buckets, is_dry_run, fees, vec![format!("component_{}", self.component_address).parse().unwrap()]
-
-            ).await;
-            println!("done");
-
-       }
-
-
-    
-
-   }
+            let transaction_id = client
+                .submit_instructions(
+                    instructions,
+                    dump_buckets,
+                    is_dry_run,
+                    fees,
+                    vec![format!("component_{}", self.component_address)
+                        .parse()
+                        .unwrap()],
+                )
+                .await;
+            println!("submitted");
+            let result = client.wait_for_transaction_result(transaction_id).await;
+            println!("result: {:?}", result);
+        }
+    }
 }
 
 pub(crate) mod blacklist_user {
-   use clap::Args;
-   use crate::daemon_client::DaemonClient;
-   use serde_json::json;
-    use tari_engine_types::parse_arg;
+    use crate::daemon_client::DaemonClient;
+    use clap::Args;
+    use serde_json::json;
+    use std::str::FromStr;
     use tari_engine_types::instruction::Instruction;
+    use tari_engine_types::parse_arg;
+    use tari_engine_types::TemplateAddress;
+    use tari_template_lib::args;
+    use tari_template_lib::prelude::Amount;
+    use tari_template_lib::prelude::ComponentAddress;
+    use tari_template_lib::prelude::ResourceAddress;
+    use tari_transaction::SubstateRequirement;
+    use tari_utilities::hex::from_hex;
     use tari_utilities::hex::Hex;
-     use tari_utilities::hex::from_hex;
-use tari_engine_types::TemplateAddress;
-use tari_template_lib::prelude::ComponentAddress;
-use tari_transaction::SubstateRequirement;
-use tari_template_lib::args;
- use tari_template_lib::prelude::Amount;
- use tari_template_lib::prelude::ResourceAddress;
-  use std::str::FromStr;
 
+    #[derive(Debug, Args, Clone)]
+    pub struct Command {
+        pub component_address: String,
 
+        pub vault_id: String,
 
+        pub user_id: String,
+    }
 
-   #[derive(Debug, Args, Clone)]
-   pub struct Command {
-      
-      
-       pub component_address: String,
-       
-      
-      
-          
-       pub vault_id : String,
-           
-       
-      
-      
-          
-       pub user_id : String,
-           
-       
-      
-   }
+    impl Command {
+        pub async fn run(
+            self,
+            mut client: DaemonClient,
+            dump_buckets: bool,
+            is_dry_run: bool,
+            fees: u64,
+        ) {
+            // let template_address= ;
+            let method = "blacklist_user".to_string();
 
-   impl Command {
+            let mut instructions = vec![];
 
-    
+            instructions.push(Instruction::CallMethod {
+                component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
+                method,
+                args: args![
+                    parse_arg(&self.vault_id).unwrap(),
+                    parse_arg(&self.user_id).unwrap(),
+                ],
+            });
 
- pub async fn run(self, mut client: DaemonClient, dump_buckets: bool, is_dry_run: bool, fees: u64) {
-
-       // let template_address= ;
-        let method = "blacklist_user".to_string();
-
-    let mut instructions = vec![];
-    
-    instructions.push(
-    Instruction::CallMethod {
-                        component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
-                        method,
-                        args: args![
-                            
-          
-          
-          
-            
-           parse_arg(&self.vault_id).unwrap(),
-           
-          
-          
-          
-            
-           parse_arg(&self.user_id).unwrap(),
-           
-          
-          
-                        ]
-                   }
-    );
-
-                client.submit_instructions(instructions, dump_buckets, is_dry_run, fees, vec![format!("component_{}", self.component_address).parse().unwrap()]
-
-            ).await;
-            println!("done");
-
-       }
-
-
-    
-
-   }
+            let transaction_id = client
+                .submit_instructions(
+                    instructions,
+                    dump_buckets,
+                    is_dry_run,
+                    fees,
+                    vec![format!("component_{}", self.component_address)
+                        .parse()
+                        .unwrap()],
+                )
+                .await;
+            println!("submitted");
+            let result = client.wait_for_transaction_result(transaction_id).await;
+            println!("result: {:?}", result);
+        }
+    }
 }
 
 pub(crate) mod remove_from_blacklist {
-   use clap::Args;
-   use crate::daemon_client::DaemonClient;
-   use serde_json::json;
-    use tari_engine_types::parse_arg;
+    use crate::daemon_client::DaemonClient;
+    use clap::Args;
+    use serde_json::json;
+    use std::str::FromStr;
     use tari_engine_types::instruction::Instruction;
+    use tari_engine_types::parse_arg;
+    use tari_engine_types::TemplateAddress;
+    use tari_template_lib::args;
+    use tari_template_lib::prelude::Amount;
+    use tari_template_lib::prelude::ComponentAddress;
+    use tari_template_lib::prelude::ResourceAddress;
+    use tari_transaction::SubstateRequirement;
+    use tari_utilities::hex::from_hex;
     use tari_utilities::hex::Hex;
-     use tari_utilities::hex::from_hex;
-use tari_engine_types::TemplateAddress;
-use tari_template_lib::prelude::ComponentAddress;
-use tari_transaction::SubstateRequirement;
-use tari_template_lib::args;
- use tari_template_lib::prelude::Amount;
- use tari_template_lib::prelude::ResourceAddress;
-  use std::str::FromStr;
 
+    #[derive(Debug, Args, Clone)]
+    pub struct Command {
+        pub component_address: String,
 
+        pub user_id: String,
+    }
 
+    impl Command {
+        pub async fn run(
+            self,
+            mut client: DaemonClient,
+            dump_buckets: bool,
+            is_dry_run: bool,
+            fees: u64,
+        ) {
+            // let template_address= ;
+            let method = "remove_from_blacklist".to_string();
 
-   #[derive(Debug, Args, Clone)]
-   pub struct Command {
-      
-      
-       pub component_address: String,
-       
-      
-      
-          
-       pub user_id : String,
-           
-       
-      
-   }
+            let mut instructions = vec![];
 
-   impl Command {
+            instructions.push(Instruction::CallMethod {
+                component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
+                method,
+                args: args![parse_arg(&self.user_id).unwrap(),],
+            });
 
-    
-
- pub async fn run(self, mut client: DaemonClient, dump_buckets: bool, is_dry_run: bool, fees: u64) {
-
-       // let template_address= ;
-        let method = "remove_from_blacklist".to_string();
-
-    let mut instructions = vec![];
-    
-    instructions.push(
-    Instruction::CallMethod {
-                        component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
-                        method,
-                        args: args![
-                            
-          
-          
-          
-            
-           parse_arg(&self.user_id).unwrap(),
-           
-          
-          
-                        ]
-                   }
-    );
-
-                client.submit_instructions(instructions, dump_buckets, is_dry_run, fees, vec![format!("component_{}", self.component_address).parse().unwrap()]
-
-            ).await;
-            println!("done");
-
-       }
-
-
-    
-
-   }
+            let transaction_id = client
+                .submit_instructions(
+                    instructions,
+                    dump_buckets,
+                    is_dry_run,
+                    fees,
+                    vec![format!("component_{}", self.component_address)
+                        .parse()
+                        .unwrap()],
+                )
+                .await;
+            println!("submitted");
+            let result = client.wait_for_transaction_result(transaction_id).await;
+            println!("result: {:?}", result);
+        }
+    }
 }
 
 pub(crate) mod get_user_data {
-   use clap::Args;
-   use crate::daemon_client::DaemonClient;
-   use serde_json::json;
-    use tari_engine_types::parse_arg;
+    use crate::daemon_client::DaemonClient;
+    use clap::Args;
+    use serde_json::json;
+    use std::str::FromStr;
     use tari_engine_types::instruction::Instruction;
+    use tari_engine_types::parse_arg;
+    use tari_engine_types::TemplateAddress;
+    use tari_template_lib::args;
+    use tari_template_lib::prelude::Amount;
+    use tari_template_lib::prelude::ComponentAddress;
+    use tari_template_lib::prelude::ResourceAddress;
+    use tari_transaction::SubstateRequirement;
+    use tari_utilities::hex::from_hex;
     use tari_utilities::hex::Hex;
-     use tari_utilities::hex::from_hex;
-use tari_engine_types::TemplateAddress;
-use tari_template_lib::prelude::ComponentAddress;
-use tari_transaction::SubstateRequirement;
-use tari_template_lib::args;
- use tari_template_lib::prelude::Amount;
- use tari_template_lib::prelude::ResourceAddress;
-  use std::str::FromStr;
 
+    #[derive(Debug, Args, Clone)]
+    pub struct Command {
+        pub component_address: String,
 
+        pub user_id: String,
+    }
 
+    impl Command {
+        pub async fn run(
+            self,
+            mut client: DaemonClient,
+            dump_buckets: bool,
+            is_dry_run: bool,
+            fees: u64,
+        ) {
+            // let template_address= ;
+            let method = "get_user_data".to_string();
 
-   #[derive(Debug, Args, Clone)]
-   pub struct Command {
-      
-      
-       pub component_address: String,
-       
-      
-      
-          
-       pub user_id : String,
-           
-       
-      
-   }
+            let mut instructions = vec![];
 
-   impl Command {
+            instructions.push(Instruction::CallMethod {
+                component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
+                method,
+                args: args![parse_arg(&self.user_id).unwrap(),],
+            });
 
-    
-
- pub async fn run(self, mut client: DaemonClient, dump_buckets: bool, is_dry_run: bool, fees: u64) {
-
-       // let template_address= ;
-        let method = "get_user_data".to_string();
-
-    let mut instructions = vec![];
-    
-    instructions.push(
-    Instruction::CallMethod {
-                        component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
-                        method,
-                        args: args![
-                            
-          
-          
-          
-            
-           parse_arg(&self.user_id).unwrap(),
-           
-          
-          
-                        ]
-                   }
-    );
-
-                client.submit_instructions(instructions, dump_buckets, is_dry_run, fees, vec![format!("component_{}", self.component_address).parse().unwrap()]
-
-            ).await;
-            println!("done");
-
-       }
-
-
-    
-
-   }
+            let transaction_id = client
+                .submit_instructions(
+                    instructions,
+                    dump_buckets,
+                    is_dry_run,
+                    fees,
+                    vec![format!("component_{}", self.component_address)
+                        .parse()
+                        .unwrap()],
+                )
+                .await;
+            println!("submitted");
+            let result = client.wait_for_transaction_result(transaction_id).await;
+            println!("result: {:?}", result);
+        }
+    }
 }
 
 pub(crate) mod set_user_data {
-   use clap::Args;
-   use crate::daemon_client::DaemonClient;
-   use serde_json::json;
-    use tari_engine_types::parse_arg;
+    use crate::daemon_client::DaemonClient;
+    use clap::Args;
+    use serde_json::json;
+    use std::str::FromStr;
     use tari_engine_types::instruction::Instruction;
+    use tari_engine_types::parse_arg;
+    use tari_engine_types::TemplateAddress;
+    use tari_template_lib::args;
+    use tari_template_lib::prelude::Amount;
+    use tari_template_lib::prelude::ComponentAddress;
+    use tari_template_lib::prelude::ResourceAddress;
+    use tari_transaction::SubstateRequirement;
+    use tari_utilities::hex::from_hex;
     use tari_utilities::hex::Hex;
-     use tari_utilities::hex::from_hex;
-use tari_engine_types::TemplateAddress;
-use tari_template_lib::prelude::ComponentAddress;
-use tari_transaction::SubstateRequirement;
-use tari_template_lib::args;
- use tari_template_lib::prelude::Amount;
- use tari_template_lib::prelude::ResourceAddress;
-  use std::str::FromStr;
 
+    #[derive(Debug, Args, Clone)]
+    pub struct Command {
+        pub component_address: String,
 
+        pub user_id: String,
 
+        pub data: String,
+    }
 
-   #[derive(Debug, Args, Clone)]
-   pub struct Command {
-      
-      
-       pub component_address: String,
-       
-      
-      
-          
-       pub user_id : String,
-           
-       
-      
-      
-          
-       pub data : String,
-           
-       
-      
-   }
+    impl Command {
+        pub async fn run(
+            self,
+            mut client: DaemonClient,
+            dump_buckets: bool,
+            is_dry_run: bool,
+            fees: u64,
+        ) {
+            // let template_address= ;
+            let method = "set_user_data".to_string();
 
-   impl Command {
+            let mut instructions = vec![];
 
-    
+            instructions.push(Instruction::CallMethod {
+                component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
+                method,
+                args: args![
+                    parse_arg(&self.user_id).unwrap(),
+                    parse_arg(&self.data).unwrap(),
+                ],
+            });
 
- pub async fn run(self, mut client: DaemonClient, dump_buckets: bool, is_dry_run: bool, fees: u64) {
-
-       // let template_address= ;
-        let method = "set_user_data".to_string();
-
-    let mut instructions = vec![];
-    
-    instructions.push(
-    Instruction::CallMethod {
-                        component_address: ComponentAddress::from_hex(&self.component_address).unwrap(),
-                        method,
-                        args: args![
-                            
-          
-          
-          
-            
-           parse_arg(&self.user_id).unwrap(),
-           
-          
-          
-          
-            
-           parse_arg(&self.data).unwrap(),
-           
-          
-          
-                        ]
-                   }
-    );
-
-                client.submit_instructions(instructions, dump_buckets, is_dry_run, fees, vec![format!("component_{}", self.component_address).parse().unwrap()]
-
-            ).await;
-            println!("done");
-
-       }
-
-
-    
-
-   }
+            let transaction_id = client
+                .submit_instructions(
+                    instructions,
+                    dump_buckets,
+                    is_dry_run,
+                    fees,
+                    vec![format!("component_{}", self.component_address)
+                        .parse()
+                        .unwrap()],
+                )
+                .await;
+            println!("submitted");
+            let result = client.wait_for_transaction_result(transaction_id).await;
+            println!("result: {:?}", result);
+        }
+    }
 }
-
-
